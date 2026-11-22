@@ -1,0 +1,38 @@
+# Local planning notes
+claude-palning/
+claude-planning/
+.claude/
+
+# Local data and generated files
+data/
+*.csv
+manifest.json
+logs/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.tfplan
+
+# dbt
+profiles.yml
+target/
+dbt_packages/
+dbt/logs/
