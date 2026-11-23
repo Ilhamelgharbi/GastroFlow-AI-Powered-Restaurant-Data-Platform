@@ -1,0 +1,60 @@
+== Row counts and null counts ==
+
+restaurants: 148,541 rows
+  name: 86 null/blank (0.1%)
+  rating: 86 null/blank (0.1%)
+  rating_count: 86 null/blank (0.1%)
+  cost: 131 null/blank (0.1%)
+  cuisine: 99 null/blank (0.1%)
+  lic_no: 229 null/blank (0.2%)
+  address: 86 null/blank (0.1%)
+
+users: 100,000 rows
+
+food: 371,561 rows
+  item: 1 null/blank (0.0%)
+  veg_or_non_veg: 1 null/blank (0.0%)
+
+menu: 1,179,936 rows
+
+orders: 10,000,000 rows
+  customer_rating: 3,592,803 null/blank (35.9%)
+  delivery_time_min: 849,878 null/blank (8.5%)
+
+order_items: 22,998,179 rows
+
+reviews: 300,000 rows
+
+== Duplicate primary keys ==
+restaurants.id: 0 duplicates
+users.user_id: 0 duplicates
+food.f_id: 0 duplicates
+menu.menu_id: 131,361 duplicates
+orders.order_id: 0 duplicates
+order_items.order_item_id: 0 duplicates
+reviews.review_id: 0 duplicates
+
+== Orphan foreign keys ==
+orders.user_id -> users.user_id: 0 orphans
+orders.r_id -> restaurants.id: 0 orphans
+order_items.order_id -> orders.order_id: 0 orphans
+order_items.f_id -> food.f_id: 0 orphans
+menu.r_id -> restaurants.id: 273 orphans
+menu.f_id -> food.f_id: 0 orphans
+reviews.order_id -> orders.order_id: 0 orphans
+reviews.user_id -> users.user_id: 0 orphans
+reviews.restaurant_id -> restaurants.id: 0 orphans
+
+== Messy restaurant values ==
+rating = '--': 87,014
+cost with currency symbol: 148,410
+city with comma: 101,712
+rating_count not numeric: 148,541
+
+== Categorical values worth knowing ==
+SELECT order_status, count(*) FROM orders GROUP BY 1 ORDER BY 2 DESC -> [('Delivered', 9150122), ('Cancelled', 599251), ('Refunded', 250627)]
+SELECT payment_method, count(*) FROM orders GROUP BY 1 ORDER BY 2 DESC -> [('UPI', 4599971), ('Card', 1998893), ('Wallet', 1500031), ('COD', 1401129), ('NetBanking', 499976)]
+
+== Reviews ==
+blank comments: 0
+distinct comments: 294
