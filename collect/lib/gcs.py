@@ -3,6 +3,10 @@
 from pathlib import Path
 
 from google.cloud import storage
+from google.cloud.storage.retry import DEFAULT_RETRY
+
+UPLOAD_TIMEOUT_SECONDS = 300
+UPLOAD_CHUNK_SIZE_BYTES = 8 * 1024 * 1024
 
 
 def make_client(project_id: str) -> storage.Client:
@@ -23,5 +27,10 @@ def upload_file(
     """
     size_bytes = local_path.stat().st_size
     blob = client.bucket(bucket).blob(object_name)
-    blob.upload_from_filename(str(local_path))
+    blob.chunk_size = UPLOAD_CHUNK_SIZE_BYTES
+    blob.upload_from_filename(
+        str(local_path),
+        timeout=UPLOAD_TIMEOUT_SECONDS,
+        retry=DEFAULT_RETRY.with_deadline(UPLOAD_TIMEOUT_SECONDS),
+    )
     return size_bytes

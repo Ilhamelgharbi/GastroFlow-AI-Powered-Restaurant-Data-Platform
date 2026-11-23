@@ -2,7 +2,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from collect.lib.gcs import make_client, upload_file
+from collect.lib.gcs import (
+    UPLOAD_CHUNK_SIZE_BYTES,
+    UPLOAD_TIMEOUT_SECONDS,
+    make_client,
+    upload_file,
+)
 
 
 def test_make_client_uses_project_and_default_credentials(monkeypatch):
@@ -24,9 +29,13 @@ def test_upload_file_uploads_to_bucket_and_returns_size(tmp_path):
     assert size_bytes == path.stat().st_size
     client.bucket.assert_called_once_with("lake-bucket")
     client.bucket.return_value.blob.assert_called_once_with("raw/food/food.csv")
-    client.bucket.return_value.blob.return_value.upload_from_filename.assert_called_once_with(
-        str(path)
-    )
+    blob = client.bucket.return_value.blob.return_value
+    assert blob.chunk_size == UPLOAD_CHUNK_SIZE_BYTES
+    blob.upload_from_filename.assert_called_once()
+    upload_args, upload_kwargs = blob.upload_from_filename.call_args
+    assert upload_args == (str(path),)
+    assert upload_kwargs["timeout"] == UPLOAD_TIMEOUT_SECONDS
+    assert upload_kwargs["retry"].deadline == UPLOAD_TIMEOUT_SECONDS
 
 
 def test_upload_file_propagates_upload_errors(tmp_path):
