@@ -36,3 +36,6 @@ profiles.yml
 target/
 dbt_packages/
 dbt/logs/
+
+tfplan
+*.tfplan
