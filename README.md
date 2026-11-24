@@ -1,108 +1,52 @@
 # GastroFlow
 
-Restaurant data engineering platform built on Google Cloud. GastroFlow takes
-seven CSV sources through a reproducible pipeline into a GCS data lake and a
-BigQuery warehouse, then uses dbt to create tested analytical models.
+GastroFlow is a restaurant- ai data platform that lands original CSV files in
+Google Cloud Storage, loads them into BigQuery RAW, and transforms them with
+dbt into staging views and analytical marts.
 
-## Architecture
+## Current data flow
 
 ```text
-Local CSV sources
-    |
-    | audit, validate, remove sensitive fields
-    v
-Sanitized files
-    |
-    | upload with checksums
-    v
-Google Cloud Storage (raw/<table>/)
-    |
-    | explicit-schema load jobs
-    v
-BigQuery RAW -> dbt staging -> dbt marts and snapshots
-                                      |
-                 +--------------------+--------------------+
-                 |                    |                    |
-            Power BI           Review enrichment      RAG / Text-to-SQL
-
-Terraform provisions cloud resources. Airflow orchestrates later pipeline runs.
+data/sample/<table>/<table>.csv
+        |
+        | collect_v2: upload original CSV bytes
+        v
+GCS: raw/<table>/<table>.csv
+        |
+        | collect_v2: explicit all-STRING schema, WRITE_TRUNCATE
+        v
+BigQuery: gastroflow_raw
+        |
+        | dbt
+        v
+gastroflow_staging -> gastroflow_marts
 ```
 
-### Technology
+`collect_v2` is the current direct-source collection path. It preserves source
+file bytes and cell values in GCS. BigQuery column identifiers are normalized
+by position; values are loaded as strings, and a blank source header is mapped
+to `source_index`. The older `collect/` package is retained as the legacy
+sanitizing path and has not been changed.
 
-| Area | Technology |
-|---|---|
-| Data lake | Google Cloud Storage |
-| Warehouse | BigQuery |
-| Transformations and tests | dbt Core with `dbt-bigquery` |
-| Infrastructure | Terraform |
-| Local profiling | DuckDB |
-| Review enrichment and language applications | Vertex AI / Gemini |
-| Orchestration | Apache Airflow |
-| Dashboards and applications | Power BI and Streamlit |
+The sample users CSV contains mock `email` and `password` fields. Only upload
+synthetic data; never use real credentials or personal information.
 
 ## Repository layout
 
 ```text
-collect/                 Local data preparation and GCS/BigQuery ingestion
+collect/                 Legacy sanitized collection workflow
+collect_v2/              Direct-source GCS upload and BigQuery RAW load
+transformation/          dbt BigQuery project: staging, marts, and tests
 terraform/               Google Cloud infrastructure
-dbt/                     Staging, marts, snapshots, and data tests
-ai/                      Review enrichment and retrieval
+ai/                      AI application and enrichment code
 app/                     Streamlit applications
-airflow/dags/             Pipeline orchestration
-docs/data_dictionary/     Data definitions and quality notes
-tests/                    Python tests
+airflow/                 Pipeline orchestration
+data/sample/             Local source CSVs (ignored by Git)
 ```
-
-Local source data, generated data, credentials, Terraform state, and planning
-notes are intentionally excluded from Git. See `.gitignore`.
-
-## Delivery phases
-
-1. **Source audit and sanitize:** profile the seven CSVs, verify keys and
-   relationships, and produce sanitized files without `_idx`, `email`, or
-   `password`.
-2. **Cloud foundation:** provision a private GCS bucket, BigQuery datasets,
-   APIs, and least-privilege service accounts with Terraform.
-3. **GCS and BigQuery RAW:** upload sanitized CSVs with SHA-256 checksums and
-   load them into explicit-schema, all-STRING BigQuery raw tables.
-4. **dbt staging:** clean and type the raw data; add schema and relationship
-   tests.
-5. **Marts and snapshots:** build analytical facts, dimensions, and history.
-6. **AI, applications, orchestration, and dashboards:** add these only after
-   the core data pipeline passes its checks.
-
-Complete and verify one phase before beginning the next. Start with a sample
-before loading the full dataset.
-
-## Privacy and security
-
-- Remove `_idx`, `email`, and `password` locally before any cloud upload.
-- Never commit source data, `.env`, credentials, Terraform state, or
-  `profiles.yml`.
-- Use least-privilege IAM and read-only access for analytical query tools.
-- Set a cloud billing alert before provisioning resources.
-
-## Development workflow
-
-Use `develop` for integration and create a feature branch for each phase or
-independently reviewable change. Keep `main` for verified releases.
-
-```powershell
-git switch develop
-git switch -c feature/phase-1-source-audit
-# make and test changes
-git add <files>
-git commit -m "Add source audit and sanitization"
-git push -u origin feature/phase-1-source-audit
-```
-
-Merge completed feature branches into `develop` after review and validation.
-Promote a verified release from `develop` to `main`.
 
 ## Local setup
 
-Python 3.11 or newer is recommended.
+Use the project virtual environment and install dependencies:
 
 ```powershell
 python -m venv .venv
@@ -112,5 +56,50 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Fill in `.env` locally; do not commit it. Cloud authentication and the GCP
-project are configured during the cloud-foundation phase.
+Set `GCP_PROJECT_ID`, `GCS_BUCKET`, and other local settings in `.env`. Configure
+the dbt `transformation` profile in `%USERPROFILE%\.dbt\profiles.yml` with
+BigQuery OAuth, the project, dataset `gastroflow`, and location `europe-west1`.
+Keep credentials and profiles out of Git.
+
+## Collection commands
+
+Run one table at a time:
+
+```powershell
+python -m collect_v2.upload_to_gcs --tables food
+python -m collect_v2.load_to_bigquery --tables food
+```
+
+Omit `--tables ...` to process all seven tables. Both commands default to
+`data/sample`. Loading uses `WRITE_TRUNCATE`: reruns replace the matching
+GCS object and BigQuery RAW table.
+
+## dbt commands
+
+Run from the repository root:
+
+```powershell
+.\.venv\Scripts\dbt.exe debug --project-dir transformation
+.\.venv\Scripts\dbt.exe test --project-dir transformation
+.\.venv\Scripts\dbt.exe build --project-dir transformation --select staging marts
+```
+
+The review-insights mart remains disabled until its AI-enriched review source
+table is created. The current local dbt profile has a 2 GB per-query billing
+cap; the initial `fct_order_items` build requires about 2.42 GB, so that
+specific build needs an explicitly approved higher cap.
+
+## Git and generated files
+
+Feature work belongs on a feature branch and should be pushed for review before
+merging into `develop`. Keep `main` for verified releases. `.gitignore` excludes
+local data, Claude planning files, `.env`, dbt profiles, compiled targets,
+packages, and logs.
+
+```powershell
+git switch -c feature/your-feature
+# make and validate changes
+git add <files>
+git commit -m "Describe the change"
+git push -u origin feature/your-feature
+```

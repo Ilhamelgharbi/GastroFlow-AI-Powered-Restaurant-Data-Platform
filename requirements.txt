@@ -4,5 +4,7 @@ pyarrow
 python-dotenv
 google-cloud-storage
 google-cloud-bigquery
+dbt-bigquery
+dbt-core
 pytest
 ruff
