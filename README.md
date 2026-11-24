@@ -82,12 +82,18 @@ Run from the repository root:
 .\.venv\Scripts\dbt.exe debug --project-dir transformation
 .\.venv\Scripts\dbt.exe test --project-dir transformation
 .\.venv\Scripts\dbt.exe build --project-dir transformation --select staging marts
+.\.venv\Scripts\dbt.exe snapshot --project-dir transformation --select snap_restaurants snap_orders
 ```
 
 The review-insights mart remains disabled until its AI-enriched review source
 table is created. The current local dbt profile has a 2 GB per-query billing
 cap; the initial `fct_order_items` build requires about 2.42 GB, so that
 specific build needs an explicitly approved higher cap.
+
+The two dbt snapshots use the `check` strategy to preserve restaurant attribute
+history and order status/amount history in `gastroflow_snapshots`. They capture
+a baseline on the first run; to see another version, a tracked value must change
+in a non-production source before rerunning the snapshot command.
 
 ## Git and generated files
 

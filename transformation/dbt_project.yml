@@ -38,3 +38,8 @@ models:
     marts:
       +materialized: table
       +schema: marts
+
+snapshots:
+  transformation:
+    # Snapshot target_schema is the final BigQuery dataset name.
+    +target_schema: gastroflow_snapshots
