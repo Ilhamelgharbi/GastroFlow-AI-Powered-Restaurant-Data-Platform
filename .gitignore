@@ -31,11 +31,11 @@ __pycache__/
 terraform.tfvars
 *.tfplan
 
-# dbt
-profiles.yml
-target/
-dbt_packages/
-dbt/logs/
+# dbt local profiles and generated artifacts
+**/profiles.yml
+**/target/
+**/dbt_packages/
+**/logs/
 
 tfplan
 *.tfplan
