@@ -1,19 +1,20 @@
 # GastroFlow
 
-GastroFlow is a restaurant- ai data platform that lands original CSV files in
+GastroFlow is a restaurant data platform that lands original CSV files in
 Google Cloud Storage, loads them into BigQuery RAW, and transforms them with
-dbt into staging views and analytical marts.
+dbt into staging views and analytical marts. Airflow orchestrates the local
+development pipeline.
 
 ## Current data flow
 
 ```text
 data/sample/<table>/<table>.csv
         |
-        | collect_v2: upload original CSV bytes
+        | collect: upload original CSV bytes
         v
 GCS: raw/<table>/<table>.csv
         |
-        | collect_v2: explicit all-STRING schema, WRITE_TRUNCATE
+        | collect: explicit all-STRING schema, WRITE_TRUNCATE
         v
 BigQuery: gastroflow_raw
         |
@@ -22,11 +23,10 @@ BigQuery: gastroflow_raw
 gastroflow_staging -> gastroflow_marts
 ```
 
-`collect_v2` is the current direct-source collection path. It preserves source
-file bytes and cell values in GCS. BigQuery column identifiers are normalized
-by position; values are loaded as strings, and a blank source header is mapped
-to `source_index`. The older `collect/` package is retained as the legacy
-sanitizing path and has not been changed.
+`collect/` is the direct-source collection path. It preserves source file bytes
+in GCS and loads all source columns into BigQuery RAW as strings. Column names
+are normalized by position, and a blank source header is mapped to
+`source_index`.
 
 The sample users CSV contains mock `email` and `password` fields. Only upload
 synthetic data; never use real credentials or personal information.
@@ -34,13 +34,10 @@ synthetic data; never use real credentials or personal information.
 ## Repository layout
 
 ```text
-collect/                 Legacy sanitized collection workflow
-collect_v2/              Direct-source GCS upload and BigQuery RAW load
+collect/                 Direct-source GCS upload and BigQuery RAW load
 transformation/          dbt BigQuery project: staging, marts, and tests
 terraform/               Google Cloud infrastructure
-ai/                      AI application and enrichment code
-app/                     Streamlit applications
-airflow/                 Pipeline orchestration
+airflow/                 Local Docker Compose orchestration
 data/sample/             Local source CSVs (ignored by Git)
 ```
 
@@ -56,18 +53,18 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set `GCP_PROJECT_ID`, `GCS_BUCKET`, and other local settings in `.env`. Configure
-the dbt `transformation` profile in `%USERPROFILE%\.dbt\profiles.yml` with
-BigQuery OAuth, the project, dataset `gastroflow`, and location `europe-west1`.
-Keep credentials and profiles out of Git.
+Set `GCP_PROJECT_ID`, `GCP_REGION`, `GCS_BUCKET`, and other local settings in
+`.env`. Authenticate local Google Cloud access with Application Default
+Credentials using `gcloud auth application-default login`. Keep credentials
+and profiles out of Git.
 
 ## Collection commands
 
 Run one table at a time:
 
 ```powershell
-python -m collect_v2.upload_to_gcs --tables food
-python -m collect_v2.load_to_bigquery --tables food
+python -m collect.upload_to_gcs --tables food
+python -m collect.load_to_bigquery --tables food
 ```
 
 Omit `--tables ...` to process all seven tables. Both commands default to
@@ -84,6 +81,35 @@ Run from the repository root:
 .\.venv\Scripts\dbt.exe build --project-dir transformation --select staging marts
 .\.venv\Scripts\dbt.exe snapshot --project-dir transformation --select snap_restaurants snap_orders
 ```
+
+## Local Airflow
+
+The local Airflow DAG is manual-triggered and runs the pipeline in order:
+upload source CSVs to GCS, load BigQuery RAW, build dbt staging and marts, then
+run the two dbt snapshots. AI enrichment is deferred; the AI-dependent mart is
+disabled and excluded from the DAG.
+
+After setting up `.env` and Google Application Default Credentials, start the
+stack from the repository root:
+
+```powershell
+docker compose --env-file .env -f airflow/docker-compose.yaml up --build -d
+docker compose --env-file .env -f airflow/docker-compose.yaml ps
+```
+
+Open `http://localhost:8080` and trigger `gastroflow_batch`. The local-only
+default login is `admin` / `admin`; set `AIRFLOW_ADMIN_PASSWORD` in `.env` to
+change it. `GCP_ADC_FILE` can point to the ADC JSON file; if blank, Compose uses
+the standard Windows ADC location under `%APPDATA%\gcloud`.
+
+The DAG is manual because its BigQuery load uses `WRITE_TRUNCATE`. Stop the
+local services with:
+
+```powershell
+docker compose --env-file .env -f airflow/docker-compose.yaml down
+```
+
+This branch sets up local Airflow only; Cloud Composer Terraform is deferred.
 
 The review-insights mart remains disabled until its AI-enriched review source
 table is created. The current local dbt profile has a 2 GB per-query billing

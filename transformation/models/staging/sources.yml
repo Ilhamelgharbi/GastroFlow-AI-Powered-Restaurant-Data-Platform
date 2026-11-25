@@ -2,7 +2,7 @@ version: 2
 
 sources:
   - name: raw
-    database: zomato-data-engineering
+    database: "{{ env_var('GCP_PROJECT_ID') }}"
     schema: gastroflow_raw
     tables:
       - name: restaurants
@@ -13,8 +13,9 @@ sources:
       - name: order_items
       - name: reviews
 
+  # Reserved for future review enrichment; the local Airflow DAG excludes AI models.
   - name: ai
-    database: zomato-data-engineering
+    database: "{{ env_var('GCP_PROJECT_ID') }}"
     schema: "{{ env_var('BQ_AI_DATASET', 'gastroflow_ai') }}"
     tables:
       - name: review_enriched

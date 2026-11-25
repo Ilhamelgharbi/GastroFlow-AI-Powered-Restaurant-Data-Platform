@@ -1,0 +1,105 @@
+x-airflow-common: &airflow-common
+  image: gastroflow-airflow:local
+  environment: &airflow-environment
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__API__WORKERS: "1"
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_JWT_SECRET:-gastroflow-local-airflow-jwt-secret-change-me}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://apiserver:8080/execution/
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID:?Set GCP_PROJECT_ID in the repository .env}
+    GCP_REGION: ${GCP_REGION:-europe-west1}
+    GCS_BUCKET: ${GCS_BUCKET:?Set GCS_BUCKET in the repository .env}
+    GCS_PREFIX: ${GCS_PREFIX:-raw/}
+    BQ_RAW_DATASET: ${BQ_RAW_DATASET:-gastroflow_raw}
+    DBT_DATASET: ${DBT_DATASET:-gastroflow_staging}
+    AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+    AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-airflow@gastroflow.local}
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp/application_default_credentials.json
+    PYTHONPATH: /opt/airflow/project
+  volumes:
+    - ./dags:/opt/airflow/dags:ro
+    - ./logs:/opt/airflow/logs
+    - ../collect:/opt/airflow/project/collect:ro
+    - ../data/sample:/opt/airflow/project/data/sample:ro
+    - ../transformation:/opt/airflow/project/transformation
+    - ./dbt/profiles.yml.example:/opt/airflow/dbt/profiles.yml:ro
+    - type: bind
+      source: "${GCP_ADC_FILE:-${APPDATA}/gcloud/application_default_credentials.json}"
+      target: /opt/airflow/gcp/application_default_credentials.json
+      read_only: true
+      bind:
+        create_host_path: false
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  airflow-init:
+    <<: *airflow-common
+    build:
+      context: .
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        users_json="$$(airflow users list --output json)"
+        if printf '%s' "$$users_json" | python -c 'import json, os, sys; users = json.load(sys.stdin); sys.exit(0 if any(user.get("username") == os.environ["AIRFLOW_ADMIN_USERNAME"] for user in users) else 1)'; then
+          echo "Airflow admin user already exists."
+        else
+          airflow users create \
+            --username "$$AIRFLOW_ADMIN_USERNAME" \
+            --password "$$AIRFLOW_ADMIN_PASSWORD" \
+            --firstname Gastro \
+            --lastname Flow \
+            --role Admin \
+            --email "$$AIRFLOW_ADMIN_EMAIL"
+        fi
+
+  apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:

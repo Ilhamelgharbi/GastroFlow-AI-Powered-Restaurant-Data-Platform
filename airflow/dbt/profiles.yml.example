@@ -1,0 +1,12 @@
+transformation:
+  target: local
+  outputs:
+    local:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      dataset: "{{ env_var('DBT_DATASET', 'gastroflow_staging') }}"
+      location: "{{ env_var('GCP_REGION', 'europe-west1') }}"
+      threads: 4
+      job_execution_timeout_seconds: 300
+      priority: interactive
