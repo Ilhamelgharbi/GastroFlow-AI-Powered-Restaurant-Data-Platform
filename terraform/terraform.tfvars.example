@@ -1,2 +1,10 @@
 project_id = "your-project-id"
 region     = "europe-west1"
+prefix     = "gastroflow"
+
+# Keep destructive cleanup disabled for shared or persistent data.
+force_destroy  = false
+enable_composer = false
+
+# Set to an image version available in the chosen region before enabling Composer.
+# composer_image_version = "composer-3-airflow-..."

@@ -16,11 +16,17 @@ variable "prefix" {
 
 variable "force_destroy" {
   type        = bool
-  default     = true
-  description = "Allow destroy to delete non-empty bucket and datasets (dev only)"
+  default     = false
+  description = "Allow Terraform to delete non-empty buckets and datasets"
 }
 
 variable "enable_composer" {
   type    = bool
   default = false
+}
+
+variable "composer_image_version" {
+  type        = string
+  default     = ""
+  description = "Pinned Composer image version; required when enable_composer is true"
 }

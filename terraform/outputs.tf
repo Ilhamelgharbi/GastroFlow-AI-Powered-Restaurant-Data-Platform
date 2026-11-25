@@ -13,3 +13,11 @@ output "pipeline_sa" {
 output "readonly_sa" {
   value = google_service_account.readonly.email
 }
+
+output "composer_airflow_uri" {
+  value = var.enable_composer ? google_composer_environment.this[0].config[0].airflow_uri : null
+}
+
+output "composer_bucket" {
+  value = var.enable_composer ? local.composer_bucket : null
+}
