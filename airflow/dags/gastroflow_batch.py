@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+from itertools import pairwise
 
 import pendulum
 
@@ -18,7 +19,29 @@ DATA_DIR = f"{PROJECT_DIR}/data/sample"
 DBT_PROJECT_DIR = f"{PROJECT_DIR}/transformation"
 DBT_PROFILES_DIR = "/opt/airflow/dbt"
 GASTROFLOW_ENV = os.getenv("GASTROFLOW_ENV", "local")
-COMPOSER_TABLE = "food"
+COMPOSER_TABLES = ("food",)
+PIPELINE_TABLE_ORDER = (
+    "food",
+    "menu",
+    "restaurants",
+    "users",
+    "reviews",
+    "orders",
+    "order_items",
+)
+TABLE_DEPENDENCIES = {
+    "reviews": ("restaurants",),
+    "order_items": ("orders",),
+}
+DBT_MODELS_BY_TABLE = {
+    "food": ("stg_food", "dim_food"),
+    "menu": ("stg_menu",),
+    "restaurants": ("stg_restaurants", "dim_restaurants"),
+    "users": ("stg_users", "dim_customers"),
+    "reviews": ("stg_reviews",),
+    "orders": ("stg_orders", "fct_orders"),
+    "order_items": ("stg_order_items", "fct_order_items"),
+}
 
 if GASTROFLOW_ENV not in {"local", "composer"}:
     raise ValueError(f"Unsupported GASTROFLOW_ENV: {GASTROFLOW_ENV}")
@@ -36,10 +59,49 @@ def load_table_from_gcs(table: str) -> dict[str, str | int | None]:
     )
 
 
-def composer_dbt_command() -> str:
+def composer_tables_to_load(tables: tuple[str, ...]) -> tuple[str, ...]:
+    if not tables:
+        raise ValueError("COMPOSER_TABLES must contain at least one table")
+    if len(set(tables)) != len(tables):
+        raise ValueError("COMPOSER_TABLES must not contain duplicate tables")
+
+    unknown_tables = set(tables).difference(PIPELINE_TABLE_ORDER)
+    if unknown_tables:
+        raise ValueError(
+            f"Unsupported Composer table(s): {', '.join(sorted(unknown_tables))}"
+        )
+
+    required_tables = set(tables)
+    for table in tables:
+        required_tables.update(TABLE_DEPENDENCIES.get(table, ()))
+
+    return tuple(
+        table for table in PIPELINE_TABLE_ORDER if table in required_tables
+    )
+
+
+def composer_dbt_command(tables: tuple[str, ...]) -> str:
     dbt_venv = "/tmp/gastroflow_dbt_venv"
     dbt_project = "/tmp/gastroflow_dbt_project"
     profile_dir = "/home/airflow/gcs/data/dbt_profiles"
+    if set(tables) == set(PIPELINE_TABLE_ORDER):
+        selection = (
+            "--select staging marts "
+            "--exclude tag:ai assert_fct_orders_customer_exists"
+        )
+    else:
+        models = tuple(
+            dict.fromkeys(
+                model
+                for table in tables
+                for model in DBT_MODELS_BY_TABLE[table]
+            )
+        )
+        selection = (
+            f"--select {' '.join(models)} "
+            "--exclude assert_fct_orders_customer_exists"
+        )
+
     return "\n".join(
         [
             "set -euo pipefail",
@@ -53,7 +115,7 @@ def composer_dbt_command() -> str:
             (
                 f"{dbt_venv}/bin/dbt build --project-dir {dbt_project} "
                 f"--profiles-dir {profile_dir} "
-                "--select stg_food dim_food"
+                f"{selection}"
             ),
         ]
     )
@@ -73,16 +135,22 @@ with DAG(
     doc_md=__doc__,
 ) as dag:
     if GASTROFLOW_ENV == "composer":
-        load_food = PythonOperator(
-            task_id=f"load_raw_{COMPOSER_TABLE}",
-            python_callable=load_table_from_gcs,
-            op_kwargs={"table": COMPOSER_TABLE},
+        composer_tables = composer_tables_to_load(COMPOSER_TABLES)
+        load_tasks = [
+            PythonOperator(
+                task_id=f"load_raw_{table}",
+                python_callable=load_table_from_gcs,
+                op_kwargs={"table": table},
+            )
+            for table in composer_tables
+        ]
+        build_dbt_models = BashOperator(
+            task_id="build_dbt_staging_and_marts",
+            bash_command=composer_dbt_command(composer_tables),
         )
-        build_food_models = BashOperator(
-            task_id="build_food_models",
-            bash_command=composer_dbt_command(),
-        )
-        load_food >> build_food_models
+        for previous_task, next_task in pairwise(load_tasks):
+            previous_task >> next_task
+        load_tasks[-1] >> build_dbt_models
     else:
         upload_originals = BashOperator(
             task_id="upload_originals_to_gcs",

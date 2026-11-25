@@ -8,7 +8,7 @@ select
     marital_status,
     occupation,
     monthly_income as income_band,
-    education,
+    educational_qualifications as education,
     safe_cast(family_size as int64) as family_size
 from {{ source('raw', 'users') }}
 where safe_cast(user_id as int64) is not null

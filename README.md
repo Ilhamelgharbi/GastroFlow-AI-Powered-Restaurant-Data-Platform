@@ -37,7 +37,7 @@ synthetic data; never use real credentials or personal information.
 collect/                 Direct-source GCS upload and BigQuery RAW load
 transformation/          dbt BigQuery project: staging, marts, and tests
 terraform/               Google Cloud infrastructure
-airflow/                 Local Docker Compose orchestration
+airflow/                 Local Docker Compose and Cloud Composer DAGs
 data/sample/             Local source CSVs (ignored by Git)
 ```
 
@@ -112,13 +112,57 @@ docker compose --env-file .env -f airflow/docker-compose.yaml down
 ## Cloud Composer
 
 The Composer environment, runtime service account, and DAG/dbt uploads are
-managed by Terraform. The food-only pilot is deployed and validated; Composer
-reads CSV objects from the project lake bucket and cannot read the local
-`data/sample` directory. The DAG loads `food` and builds `stg_food`/`dim_food`;
-other models and snapshots require their source tables to be loaded first.
-See the [Cloud Composer implementation guide](docs/cloud-composer-implementation-guide.md)
-for the deployed configuration and run commands. Composer has ongoing costs
-while provisioned.
+managed by Terraform. Composer cannot read the local `data/sample` directory;
+the manual `gastroflow_batch` DAG loads selected CSV objects from the project
+lake bucket into BigQuery RAW, then runs the matching dbt transformations.
+`gastroflow_collect` and `gastroflow_transform` remain available as separate
+manual phases for troubleshooting.
+
+The end-to-end DAG is intentionally configured to run only the `food` table
+while validating the workflow. In `airflow/dags/gastroflow_batch.py`, expand
+`COMPOSER_TABLES` to include additional sources when ready:
+
+```python
+COMPOSER_TABLES = (
+    "food",
+    "menu",
+    "restaurants",
+    "users",
+    "reviews",
+    "orders",
+    "order_items",
+)
+```
+
+The DAG loads the selected GCS objects sequentially, then builds dbt models.
+It automatically includes `restaurants` when `reviews` is selected and
+`orders` when `order_items` is selected. With all seven tables enabled, it
+builds the staging and marts models, excluding the disabled AI mart and the
+order/customer consistency test that queries an existing order fact table.
+The RAW loads use `WRITE_TRUNCATE`; keep the DAG manual.
+
+To publish the DAG update, review the Terraform plan first. It should update
+only the Composer DAG object, not recreate the environment or change datasets:
+
+```powershell
+terraform -chdir=terraform plan -input=false -out .terraform\composer-dag.tfplan
+terraform -chdir=terraform show -no-color .terraform\composer-dag.tfplan
+terraform -chdir=terraform apply -input=false .terraform\composer-dag.tfplan
+```
+
+Then check the import status and manually trigger the current food-only run:
+
+```powershell
+gcloud composer environments run gastroflow-composer --project=zomato-data-engineering --location=europe-west1 dags list-import-errors
+gcloud composer environments run gastroflow-composer --project=zomato-data-engineering --location=europe-west1 dags trigger '--' gastroflow_batch --run-id=manual__food_full_pipeline_test
+gcloud composer environments run gastroflow-composer --project=zomato-data-engineering --location=europe-west1 dags list-runs '--' --dag-id gastroflow_batch
+```
+
+Before enabling `orders` and `order_items`, review their query costs: the
+repository estimates the initial `fct_order_items` build at about 2.42 GB
+processed. Composer has ongoing costs while provisioned. See the
+[Cloud Composer implementation guide](docs/cloud-composer-implementation-guide.md)
+for the deployed configuration, validation results, and safe shutdown steps.
 
 The review-insights mart remains disabled until its AI-enriched review source
 table is created. The current local dbt profile has a 2 GB per-query billing
