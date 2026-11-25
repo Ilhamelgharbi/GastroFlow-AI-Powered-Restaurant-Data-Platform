@@ -1,1 +1,0 @@
-"""Collect package: everything that happens before BigQuery RAW is built."""
