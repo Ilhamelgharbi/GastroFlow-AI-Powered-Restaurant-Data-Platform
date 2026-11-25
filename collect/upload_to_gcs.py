@@ -1,98 +1,56 @@
-"""Upload sanitized CSVs to GCS, skipping files with unchanged fingerprints.
+"""Upload original CSV files from data/sample to the configured GCS bucket.
 
-Run with ``python -m collect.upload_to_gcs``. Use ``--tables`` to select a
-subset, for example ``--tables orders reviews``.
+Example: python -m collect.upload_to_gcs --tables food users
 """
 
 import argparse
-import json
+from pathlib import Path
 
 from google.cloud import storage
 
 from collect.config import Settings
-from collect.lib import gcs, run_log, validation
-from collect.lib.manifest import Manifest, sha256_file
-from collect.schemas import TABLES
+from collect.lib.gcs import make_client, upload_file
+from collect.schemas import TABLES, assert_source_header, source_csv_path
 
 
 def upload_table(
-    table: str,
-    settings: Settings,
-    client: storage.Client,
-    manifest: Manifest,
-    run_id: str,
-) -> str:
-    """Validate, then upload one table unless its fingerprint is unchanged."""
-    local_path = settings.local_csv(table)
-    validation.assert_no_sensitive_columns(local_path)
-    validation.assert_matches_schema(table, local_path)
-
-    digest = sha256_file(local_path)
-    gcs_uri = settings.gcs_uri(table)
-    if manifest.is_unchanged(table, digest):
-        status = "unchanged"
-        size_bytes = local_path.stat().st_size
-    else:
-        size_bytes = gcs.upload_file(
-            client,
-            settings.bucket,
-            local_path,
-            settings.object_name(table),
-        )
-        manifest.record(
-            table,
-            digest,
-            bytes=size_bytes,
-            gcs_uri=gcs_uri,
-            run_id=run_id,
-        )
-        status = "uploaded"
-
-    event = {
-        "run_id": run_id,
-        "table": table,
-        "status": status,
-        "sha256": digest,
-        "bytes": size_bytes,
-        "gcs_uri": gcs_uri,
-    }
-    run_log.append_event(settings.log_path, event)
-    print(json.dumps(event, sort_keys=True))
-    return status
+    table: str, directory: Path, settings: Settings, client: storage.Client
+) -> int:
+    """Upload one original CSV without changing its bytes or header."""
+    path = source_csv_path(directory, table)
+    assert_source_header(table, path)
+    size_bytes = upload_file(
+        client,
+        settings.bucket,
+        path,
+        settings.object_name(table),
+    )
+    print(f"Uploaded {table}: {size_bytes:,} bytes to {settings.gcs_uri(table)}")
+    return size_bytes
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Upload selected tables, log per-table failures, and save the manifest."""
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--directory", type=Path, default=Path("data/sample"))
     parser.add_argument(
         "--tables",
         nargs="+",
         choices=TABLES,
-        help="Tables to upload; defaults to all raw tables.",
+        help="Tables to upload; defaults to all seven.",
     )
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
-    client = gcs.make_client(settings.project_id)
-    manifest = Manifest(settings.manifest_path)
-    run_id = run_log.new_run_id()
+    client = make_client(settings.project_id)
     failures = 0
 
     for table in args.tables or TABLES:
         try:
-            upload_table(table, settings, client, manifest, run_id)
-        except Exception as exc:  # noqa: BLE001 - log this table and continue the batch.
+            upload_table(table, args.directory, settings, client)
+        except Exception as exc:  # noqa: BLE001 - report this table and continue.
             failures += 1
-            event = {
-                "run_id": run_id,
-                "table": table,
-                "status": "error",
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-            run_log.append_event(settings.log_path, event)
-            print(json.dumps(event, sort_keys=True))
+            print(f"ERROR {table}: {type(exc).__name__}: {exc}")
 
-    manifest.save()
     return 1 if failures else 0
 
 
