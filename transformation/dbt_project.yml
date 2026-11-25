@@ -42,4 +42,4 @@ models:
 snapshots:
   transformation:
     # Snapshot target_schema is the final BigQuery dataset name.
-    +target_schema: gastroflow_snapshots
+    +target_schema: "{{ env_var('GASTROFLOW_BQ_SNAPSHOTS_DATASET', env_var('BQ_SNAPSHOTS_DATASET', 'gastroflow_snapshots')) }}"

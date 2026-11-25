@@ -109,7 +109,16 @@ local services with:
 docker compose --env-file .env -f airflow/docker-compose.yaml down
 ```
 
-This branch sets up local Airflow only; Cloud Composer Terraform is deferred.
+## Cloud Composer
+
+The Composer environment, runtime service account, and DAG/dbt uploads are
+managed by Terraform. The food-only pilot is deployed and validated; Composer
+reads CSV objects from the project lake bucket and cannot read the local
+`data/sample` directory. The DAG loads `food` and builds `stg_food`/`dim_food`;
+other models and snapshots require their source tables to be loaded first.
+See the [Cloud Composer implementation guide](docs/cloud-composer-implementation-guide.md)
+for the deployed configuration and run commands. Composer has ongoing costs
+while provisioned.
 
 The review-insights mart remains disabled until its AI-enriched review source
 table is created. The current local dbt profile has a 2 GB per-query billing

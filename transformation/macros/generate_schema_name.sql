@@ -2,6 +2,6 @@
     {%- if custom_schema_name is none -%}
         {{ target.dataset }}
     {%- else -%}
-        gastroflow_{{ custom_schema_name | trim }}
+        {{ env_var('GASTROFLOW_PREFIX', 'gastroflow') }}_{{ custom_schema_name | trim }}
     {%- endif -%}
 {%- endmacro %}

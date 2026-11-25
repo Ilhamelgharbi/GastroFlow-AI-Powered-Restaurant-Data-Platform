@@ -4,9 +4,9 @@ transformation:
     local:
       type: bigquery
       method: oauth
-      project: "{{ env_var('GCP_PROJECT_ID') }}"
-      dataset: "{{ env_var('DBT_DATASET', 'gastroflow_staging') }}"
-      location: "{{ env_var('GCP_REGION', 'europe-west1') }}"
+      project: "{{ env_var('GASTROFLOW_PROJECT_ID', env_var('GCP_PROJECT_ID', '')) }}"
+      dataset: "{{ env_var('GASTROFLOW_DBT_DATASET', env_var('DBT_DATASET', 'gastroflow_staging')) }}"
+      location: "{{ env_var('GASTROFLOW_REGION', env_var('GCP_REGION', 'europe-west1')) }}"
       threads: 4
       job_execution_timeout_seconds: 300
       priority: interactive

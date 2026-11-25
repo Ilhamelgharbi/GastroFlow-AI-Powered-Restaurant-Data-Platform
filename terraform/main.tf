@@ -7,6 +7,7 @@ locals {
     "iamcredentials.googleapis.com",
     "secretmanager.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    "composer.googleapis.com",
   ]
 
   datasets = toset(["raw", "staging", "marts", "snapshots", "ai"])
