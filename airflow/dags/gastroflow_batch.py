@@ -19,7 +19,15 @@ DATA_DIR = f"{PROJECT_DIR}/data/sample"
 DBT_PROJECT_DIR = f"{PROJECT_DIR}/transformation"
 DBT_PROFILES_DIR = "/opt/airflow/dbt"
 GASTROFLOW_ENV = os.getenv("GASTROFLOW_ENV", "local")
-COMPOSER_TABLES = ("food",)
+COMPOSER_TABLES = (
+    "food",
+    "menu",
+    "restaurants",
+    "users",
+    "reviews",
+    "orders",
+    "order_items",
+)
 PIPELINE_TABLE_ORDER = (
     "food",
     "menu",

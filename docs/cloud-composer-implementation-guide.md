@@ -5,15 +5,16 @@
 This guide documents the Google Cloud Composer deployment and operating steps
 for GastroFlow. The food-only pilot and four-table staged pilot are complete.
 The manual `gastroflow_batch` DAG now provides one end-to-end collection and
-dbt transformation run. Its active table list is intentionally just `food`;
-the DAG supports the other six source tables when deliberately enabled.
+dbt transformation run. The source table list now includes all seven tables.
+The deployed Composer DAG remains food-only until the Terraform DAG update is
+applied.
 
 ## Current state
 
 - `airflow/docker-compose.yaml` and `airflow/Dockerfile` run local Airflow 3.0.3.
 - `airflow/dags/gastroflow_batch.py` preserves local mode and has a Composer
   mode that loads the configured GCS objects into RAW, then builds dbt models.
-  The current `COMPOSER_TABLES` setting is `("food",)`.
+  Its source `COMPOSER_TABLES` setting now includes all seven tables.
 - `collect/upload_to_gcs.py` and `collect/load_to_bigquery.py` are designed for
   local source files. The loader reads local files to validate headers and
   expected row counts. `collect/load_from_gcs.py` is the cloud loading path.
@@ -21,9 +22,9 @@ the DAG supports the other six source tables when deliberately enabled.
 - Terraform manages the lake bucket, BigQuery datasets, service accounts,
   Composer environment, and DAG/dbt artifact uploads.
 - All seven sample CSVs are already in the project lake under
-  `raw/<table>/<table>.csv`. The new end-to-end DAG is configured to load only
-  `food`; the earlier collection-only run loaded `food`, `menu`, `restaurants`,
-  and `users`.
+  `raw/<table>/<table>.csv`. The previously deployed DAG loads only `food`;
+  the earlier collection-only run loaded `food`, `menu`, `restaurants`, and
+  `users`.
 - The deployed environment uses `composer-3-airflow-2.11.1-build.27` in
   `europe-west1`. Its name is `gastroflow-composer`.
 - Airflow reports no DAG import errors. The manual food DAG run succeeded, and
@@ -36,14 +37,17 @@ the DAG supports the other six source tables when deliberately enabled.
   with `PASS=12`, `ERROR=0`, and `SKIP=0`. The first run also selected a
   cross-model test that queries `fct_orders`; the DAG now explicitly excludes
   that order-dependent test from future light-table runs.
-- The end-to-end DAG keeps the full source list and source dependencies in
-  code, but only runs its food load and food dbt models until the other tables
-  are intentionally enabled.
+- The source version lists all seven tables and their dependencies. Composer
+  still runs the previously deployed food-only version until Terraform
+  applies the DAG update.
 - The integrated `gastroflow_batch` run
   `manual__food_full_pipeline_retry_20261125` completed successfully: both
   `load_raw_food` and `build_dbt_staging_and_marts` succeeded. The loader
   reported 371,561 RAW rows; dbt passed both selected models and built
   `stg_food` and `dim_food`.
+- The all-table dbt selection was checked with `dbt ls` only. It has not been
+  run against BigQuery; only the food-only E2E run has been executed in
+  Composer.
 
 The local Compose stack and Cloud Composer are separate environments. The
 local Postgres metadata database is not part of Composer.
@@ -64,10 +68,10 @@ gastroflow_staging.stg_food -> gastroflow_marts.dim_food
 ```
 
 `gastroflow_batch` loads every table in its `COMPOSER_TABLES` tuple in
-sequence, then runs the matching dbt selection. Expand that tuple to the
-seven-table list only after confirming the corresponding GCS objects and
-BigQuery query budget. `reviews` automatically adds its `restaurants` source;
-`order_items` automatically adds `orders`.
+sequence, then runs the matching dbt selection. The source tuple now contains
+all seven tables. `reviews` automatically adds its `restaurants` source;
+`order_items` automatically adds `orders`. Composer continues to use the
+previous food-only version until the updated DAG object is applied.
 
 Composer has its own managed bucket for DAGs and supporting files. Keep it
 separate from the project lake bucket that stores the source CSVs.
@@ -131,7 +135,8 @@ terraform plan
   existing all-STRING schema.
 - The Composer end-to-end DAG in `airflow/dags/gastroflow_batch.py` collects
   its configured tables and then builds their dbt models in the same manual
-  run. Keep `COMPOSER_TABLES = ("food",)` for the low-cost proof run.
+  run. The source `COMPOSER_TABLES` tuple now includes all seven tables; the
+  successful Composer proof run used the earlier food-only deployed version.
 - Supported source names are `food`, `menu`, `restaurants`, `users`, `reviews`,
   `orders`, and `order_items`. If all seven are selected, the DAG runs dbt
   against the staging and marts folders, excludes the disabled AI mart, and
@@ -140,6 +145,9 @@ terraform plan
 - When a partial list is selected, dbt builds only models mapped to those
   tables. Selecting `reviews` also loads/transforms `restaurants`; selecting
   `order_items` also loads/transforms `orders`.
+- The all-table dbt selection has only been checked with `dbt ls`; it has not
+  run against BigQuery. Only the food-only E2E workflow has been executed in
+  Composer.
 - `gastroflow_collect` loads only `food`, `menu`, `restaurants`, and `users`.
   It runs sequentially and does not run dbt. It uses `WRITE_TRUNCATE`, so a
   manual rerun reloads those four RAW tables.
@@ -234,6 +242,9 @@ Vertex AI access for the first release.
 - Terraform's `fileset` uploads `airflow/dags/gastroflow_batch.py` and the dbt
   project automatically. No new Composer environment, service account, or
   dataset is needed to publish a change to the DAG's table list.
+- The source version lists all seven tables, but the deployed Composer DAG
+  remains food-only until the Terraform DAG-object update is applied. A plan
+  alone does not publish the file or trigger a run.
 - The DAG import check returned `No data found` (no import errors).
 - The manual run `manual__food_pilot_2026_11_25` completed successfully. It
   loaded and built only the food pipeline:
@@ -285,10 +296,11 @@ Vertex AI access for the first release.
 - The combined end-to-end DAG uses the same ID, `gastroflow_batch`. Its
   configured food run performs the GCS-to-BigQuery load before dbt; the earlier
   collection-only and transform-only DAGs remain available for troubleshooting.
-- Review task logs in the Airflow UI or Cloud Logging. Expand
-  `COMPOSER_TABLES` to the remaining tables only after validating their GCS
-  inputs and checking query costs. The initial `fct_order_items` build is
-  estimated at about 2.42 GB processed. Snapshots remain a separate operation.
+- The all-table selection was dry-listed with `dbt ls`; it has not been
+  executed against BigQuery. Applying the DAG object update does not trigger a
+  run. Review the plan and full-run costs before applying, then manually
+  trigger only when ready. The initial `fct_order_items` build is estimated at
+  about 2.42 GB processed. Snapshots remain a separate operation.
 - Keep `schedule=None` until overwrite and refresh behavior are explicitly
   approved.
 
@@ -343,13 +355,15 @@ Vertex AI access for the first release.
 - [x] The manual food-only load and `stg_food`/`dim_food` build pass.
 - [x] The combined `gastroflow_batch` DAG loads food from GCS and then builds
       `stg_food`/`dim_food` in the same manual run.
+- [x] The source configuration lists all seven source tables; the full dbt
+      selection was dry-listed without running BigQuery jobs.
 - [x] The separate light-table collection DAG loads food, menu, restaurants,
       and users without running dbt.
 - [x] The separate transform DAG builds the four selected staging views and
       three dimensions without reloading CSVs; the run passed. The order-
       dependent singular test is excluded from future light-table runs.
-- [ ] Only `food` is enabled in the combined DAG. Expand to the other six
-      supported tables after reviewing GCS objects, dependencies, and query
-      costs (especially the order-items mart).
+- [ ] Apply the all-table DAG update and manually run the seven-table pipeline
+      after reviewing source objects, dependencies, and query costs (especially
+      the order-items mart).
 - [ ] AI remains excluded until its input table and enrichment task exist.
 - [ ] Cost and safe Composer shutdown procedures are understood.

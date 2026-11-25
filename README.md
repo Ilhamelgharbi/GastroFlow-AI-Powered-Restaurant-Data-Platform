@@ -118,9 +118,7 @@ lake bucket into BigQuery RAW, then runs the matching dbt transformations.
 `gastroflow_collect` and `gastroflow_transform` remain available as separate
 manual phases for troubleshooting.
 
-The end-to-end DAG is intentionally configured to run only the `food` table
-while validating the workflow. In `airflow/dags/gastroflow_batch.py`, expand
-`COMPOSER_TABLES` to include additional sources when ready:
+The end-to-end DAG's source configuration includes all seven tables:
 
 ```python
 COMPOSER_TABLES = (
@@ -141,26 +139,41 @@ builds the staging and marts models, excluding the disabled AI mart and the
 order/customer consistency test that queries an existing order fact table.
 The RAW loads use `WRITE_TRUNCATE`; keep the DAG manual.
 
+The deployed Composer environment still has the previously deployed food-only
+configuration until the DAG update is applied. The all-table configuration has
+been checked with dbt's non-executing `ls` command, but only the food-only
+end-to-end run has been executed in Composer. Full execution must be an
+intentional manual trigger after reviewing the plan, source objects, and cost.
+
 To publish the DAG update, review the Terraform plan first. It should update
 only the Composer DAG object, not recreate the environment or change datasets:
 
 ```powershell
 terraform -chdir=terraform plan -input=false -out .terraform\composer-dag.tfplan
 terraform -chdir=terraform show -no-color .terraform\composer-dag.tfplan
+```
+
+Stop after `show` if you only want a preview. The plan should update the
+existing `gastroflow_batch.py` Composer DAG object only. Applying it publishes
+the new table list but does not execute the DAG:
+
+```powershell
 terraform -chdir=terraform apply -input=false .terraform\composer-dag.tfplan
 ```
 
-Then check the import status and manually trigger the current food-only run:
+After applying, check for import errors and manually trigger the all-table run:
 
 ```powershell
 gcloud composer environments run gastroflow-composer --project=zomato-data-engineering --location=europe-west1 dags list-import-errors
-gcloud composer environments run gastroflow-composer --project=zomato-data-engineering --location=europe-west1 dags trigger '--' gastroflow_batch --run-id=manual__food_full_pipeline_test
+gcloud composer environments run gastroflow-composer --project=zomato-data-engineering --location=europe-west1 dags trigger '--' gastroflow_batch --run-id=manual__all_tables_20261125
 gcloud composer environments run gastroflow-composer --project=zomato-data-engineering --location=europe-west1 dags list-runs '--' --dag-id gastroflow_batch
 ```
 
-Before enabling `orders` and `order_items`, review their query costs: the
-repository estimates the initial `fct_order_items` build at about 2.42 GB
-processed. Composer has ongoing costs while provisioned. See the
+Only the food-only E2E run has been executed in Composer so far. The all-table
+run will load and replace all seven RAW tables, then build all non-AI staging
+and marts models. Before triggering it, review the query costs: the repository
+estimates the initial `fct_order_items` build at about 2.42 GB processed.
+Composer has ongoing costs while provisioned. See the
 [Cloud Composer implementation guide](docs/cloud-composer-implementation-guide.md)
 for the deployed configuration, validation results, and safe shutdown steps.
 
