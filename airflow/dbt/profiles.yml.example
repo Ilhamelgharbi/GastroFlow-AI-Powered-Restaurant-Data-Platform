@@ -8,5 +8,5 @@ transformation:
       dataset: "{{ env_var('GASTROFLOW_DBT_DATASET', env_var('DBT_DATASET', 'gastroflow_staging')) }}"
       location: "{{ env_var('GASTROFLOW_REGION', env_var('GCP_REGION', 'europe-west1')) }}"
       threads: 4
-      job_execution_timeout_seconds: 300
+      job_execution_timeout_seconds: 900
       priority: interactive
