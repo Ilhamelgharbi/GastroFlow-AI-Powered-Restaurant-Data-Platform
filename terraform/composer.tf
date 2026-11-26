@@ -34,7 +34,7 @@ resource "google_project_iam_member" "composer_service_agent" {
 }
 
 resource "google_bigquery_dataset_iam_member" "composer_editor" {
-  for_each = var.enable_composer ? toset(["raw", "staging", "marts"]) : toset([])
+  for_each = var.enable_composer ? toset(["raw", "staging", "marts", "snapshots"]) : toset([])
 
   dataset_id = google_bigquery_dataset.ds[each.key].dataset_id
   role       = "roles/bigquery.dataEditor"

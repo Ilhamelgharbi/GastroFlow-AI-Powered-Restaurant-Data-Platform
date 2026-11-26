@@ -19,6 +19,9 @@ DATA_DIR = f"{PROJECT_DIR}/data/sample"
 DBT_PROJECT_DIR = f"{PROJECT_DIR}/transformation"
 DBT_PROFILES_DIR = "/opt/airflow/dbt"
 GASTROFLOW_ENV = os.getenv("GASTROFLOW_ENV", "local")
+COMPOSER_DBT_VENV = "/tmp/gastroflow_dbt_venv"
+COMPOSER_DBT_PROJECT = "/tmp/gastroflow_dbt_project"
+COMPOSER_PROFILES_DIR = "/home/airflow/gcs/data/dbt_profiles"
 COMPOSER_TABLES = (
     "food",
     "menu",
@@ -88,15 +91,29 @@ def composer_tables_to_load(tables: tuple[str, ...]) -> tuple[str, ...]:
     )
 
 
+def is_full_run(tables: tuple[str, ...]) -> bool:
+    return set(tables) == set(PIPELINE_TABLE_ORDER)
+
+
+def composer_dbt_prepare() -> list[str]:
+    """Create a throwaway dbt venv and copy the dbt project to local disk."""
+    return [
+        "set -euo pipefail",
+        f"python -m venv {COMPOSER_DBT_VENV}",
+        (
+            f"{COMPOSER_DBT_VENV}/bin/pip install --no-cache-dir "
+            "'dbt-core==1.12.4' 'dbt-bigquery==1.12.4'"
+        ),
+        f"rm -rf {COMPOSER_DBT_PROJECT}",
+        f"cp -R /home/airflow/gcs/data/transformation {COMPOSER_DBT_PROJECT}",
+    ]
+
+
 def composer_dbt_command(tables: tuple[str, ...]) -> str:
-    dbt_venv = "/tmp/gastroflow_dbt_venv"
-    dbt_project = "/tmp/gastroflow_dbt_project"
-    profile_dir = "/home/airflow/gcs/data/dbt_profiles"
-    if set(tables) == set(PIPELINE_TABLE_ORDER):
-        selection = (
-            "--select staging marts "
-            "--exclude tag:ai assert_fct_orders_customer_exists"
-        )
+    if is_full_run(tables):
+        # Full run: every staging/marts model AND every data test, including
+        # assert_fct_orders_customer_exists (fct_orders is built in this run).
+        selection = "--select staging marts --exclude tag:ai"
     else:
         models = tuple(
             dict.fromkeys(
@@ -105,28 +122,38 @@ def composer_dbt_command(tables: tuple[str, ...]) -> str:
                 for model in DBT_MODELS_BY_TABLE[table]
             )
         )
+        # Partial run: fct_orders may not exist yet, so skip the cross-model test.
         selection = (
             f"--select {' '.join(models)} "
             "--exclude assert_fct_orders_customer_exists"
         )
 
     return "\n".join(
-        [
-            "set -euo pipefail",
-            f"python -m venv {dbt_venv}",
+        composer_dbt_prepare()
+        + [
             (
-                f"{dbt_venv}/bin/pip install --no-cache-dir "
-                "'dbt-core==1.12.4' 'dbt-bigquery==1.12.4'"
-            ),
-            f"rm -rf {dbt_project}",
-            f"cp -R /home/airflow/gcs/data/transformation {dbt_project}",
-            (
-                f"{dbt_venv}/bin/dbt build --project-dir {dbt_project} "
-                f"--profiles-dir {profile_dir} "
+                f"{COMPOSER_DBT_VENV}/bin/dbt build "
+                f"--project-dir {COMPOSER_DBT_PROJECT} "
+                f"--profiles-dir {COMPOSER_PROFILES_DIR} "
                 f"{selection}"
-            ),
+            )
         ]
     )
+
+
+def composer_snapshot_command() -> str:
+    return "\n".join(
+        composer_dbt_prepare()
+        + [
+            (
+                f"{COMPOSER_DBT_VENV}/bin/dbt snapshot "
+                f"--project-dir {COMPOSER_DBT_PROJECT} "
+                f"--profiles-dir {COMPOSER_PROFILES_DIR} "
+                "--select snap_restaurants snap_orders"
+            )
+        ]
+    )
+
 
 with DAG(
     dag_id="gastroflow_batch",
@@ -159,6 +186,15 @@ with DAG(
         for previous_task, next_task in pairwise(load_tasks):
             previous_task >> next_task
         load_tasks[-1] >> build_dbt_models
+
+        # Snapshots only make sense after a full load + build (they read
+        # stg_orders and stg_restaurants).
+        if is_full_run(composer_tables):
+            run_snapshots = BashOperator(
+                task_id="run_dbt_snapshots",
+                bash_command=composer_snapshot_command(),
+            )
+            build_dbt_models >> run_snapshots
     else:
         upload_originals = BashOperator(
             task_id="upload_originals_to_gcs",
