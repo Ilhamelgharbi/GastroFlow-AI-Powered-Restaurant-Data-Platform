@@ -39,3 +39,14 @@ terraform.tfvars
 
 tfplan
 *.tfplan
+# AI layer
+.venv-ai/
+review_embeddings.parquet
+
+# Local env files that may contain secrets
+ai/example.env
+airflow/example.env
+
+# Local patch files and backups
+*.patch
+lake-backup/
