@@ -22,6 +22,9 @@ GASTROFLOW_ENV = os.getenv("GASTROFLOW_ENV", "local")
 COMPOSER_DBT_VENV = "/tmp/gastroflow_dbt_venv"
 COMPOSER_DBT_PROJECT = "/tmp/gastroflow_dbt_project"
 COMPOSER_PROFILES_DIR = "/home/airflow/gcs/data/dbt_profiles"
+COMPOSER_AI_VENV = "/tmp/gastroflow_ai_venv"
+# AI enrichment (Gemini on Vertex AI). Set GASTROFLOW_ENABLE_AI=false to skip it.
+ENABLE_AI = os.getenv("GASTROFLOW_ENABLE_AI", "true").lower() == "true"
 COMPOSER_TABLES = (
     "food",
     "menu",
@@ -113,7 +116,12 @@ def composer_dbt_command(tables: tuple[str, ...]) -> str:
     if is_full_run(tables):
         # Full run: every staging/marts model AND every data test, including
         # assert_fct_orders_customer_exists (fct_orders is built in this run).
-        selection = "--select staging marts --exclude tag:ai"
+        if ENABLE_AI:
+            # ai_enrich fills gastroflow_ai.review_enriched before this task,
+            # so the AI mart (mart_review_insights) can be built too.
+            selection = "--select staging marts --vars '{enable_ai: true}'"
+        else:
+            selection = "--select staging marts --exclude tag:ai"
     else:
         models = tuple(
             dict.fromkeys(
@@ -137,6 +145,26 @@ def composer_dbt_command(tables: tuple[str, ...]) -> str:
                 f"--profiles-dir {COMPOSER_PROFILES_DIR} "
                 f"{selection}"
             )
+        ]
+    )
+
+
+def composer_ai_command() -> str:
+    """Run ai/enrich_reviews.py in a throwaway venv (same pattern as dbt)."""
+    return "\n".join(
+        [
+            "set -euo pipefail",
+            f"python -m venv {COMPOSER_AI_VENV}",
+            (
+                f"{COMPOSER_AI_VENV}/bin/pip install --no-cache-dir --quiet "
+                "google-genai google-cloud-bigquery"
+            ),
+            "export PYTHONDONTWRITEBYTECODE=1",
+            (
+                "cd /home/airflow/gcs/dags && "
+                f"PYTHONPATH=/home/airflow/gcs/dags {COMPOSER_AI_VENV}/bin/python "
+                "-m ai.enrich_reviews"
+            ),
         ]
     )
 
@@ -186,6 +214,20 @@ with DAG(
         for previous_task, next_task in pairwise(load_tasks):
             previous_task >> next_task
         load_tasks[-1] >> build_dbt_models
+
+        # AI enrichment needs only RAW reviews, so it runs as soon as they are
+        # loaded (in parallel with the orders / order_items loads) and must
+        # finish before dbt builds the AI mart.
+        if ENABLE_AI and is_full_run(composer_tables):
+            ai_enrich = BashOperator(
+                task_id="ai_enrich_reviews",
+                bash_command=composer_ai_command(),
+                execution_timeout=timedelta(minutes=45),
+            )
+            reviews_task = next(
+                t for t in load_tasks if t.task_id == "load_raw_reviews"
+            )
+            reviews_task >> ai_enrich >> build_dbt_models
 
         # Snapshots only make sense after a full load + build (they read
         # stg_orders and stg_restaurants).

@@ -1,0 +1,8 @@
+streamlit
+pandas
+numpy
+pyarrow
+db-dtypes
+python-dotenv
+google-genai
+google-cloud-bigquery

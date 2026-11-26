@@ -24,6 +24,13 @@ resource "google_project_iam_member" "composer_jobs" {
   member  = "serviceAccount:${google_service_account.composer[0].email}"
 }
 
+resource "google_project_iam_member" "composer_vertex" {
+  count   = var.enable_composer ? 1 : 0
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.composer[0].email}"
+}
+
 resource "google_project_iam_member" "composer_service_agent" {
   count   = var.enable_composer ? 1 : 0
   project = var.project_id
@@ -34,7 +41,7 @@ resource "google_project_iam_member" "composer_service_agent" {
 }
 
 resource "google_bigquery_dataset_iam_member" "composer_editor" {
-  for_each = var.enable_composer ? toset(["raw", "staging", "marts", "snapshots"]) : toset([])
+  for_each = var.enable_composer ? toset(["raw", "staging", "marts", "snapshots", "ai"]) : toset([])
 
   dataset_id = google_bigquery_dataset.ds[each.key].dataset_id
   role       = "roles/bigquery.dataEditor"
@@ -59,6 +66,7 @@ resource "google_composer_environment" "this" {
     software_config {
       image_version = var.composer_image_version
       env_variables = {
+        GASTROFLOW_ENABLE_AI            = "false"
         GASTROFLOW_ENV                  = "composer"
         GASTROFLOW_PREFIX               = var.prefix
         GASTROFLOW_PROJECT_ID           = var.project_id
@@ -88,6 +96,7 @@ resource "google_composer_environment" "this" {
     google_project_service.apis,
     google_project_iam_member.composer_worker,
     google_project_iam_member.composer_jobs,
+    google_project_iam_member.composer_vertex,
     google_project_iam_member.composer_service_agent,
     google_bigquery_dataset_iam_member.composer_editor,
     google_storage_bucket_iam_member.composer_lake_reader,
@@ -102,11 +111,17 @@ locals {
 
   composer_dag_dir     = "${path.module}/../airflow/dags"
   composer_collect_dir = "${path.module}/../collect"
+  composer_ai_dir      = "${path.module}/../ai"
   composer_dbt_dir     = "${path.module}/../transformation"
   composer_profile     = "${path.module}/../airflow/dbt/profiles.yml.example"
 
   composer_collect_files = var.enable_composer ? [
     for file in fileset(local.composer_collect_dir, "**/*.py") : file
+    if !startswith(file, "tests/")
+  ] : []
+
+  composer_ai_files = var.enable_composer ? [
+    for file in fileset(local.composer_ai_dir, "**/*.py") : file
     if !startswith(file, "tests/")
   ] : []
 
@@ -137,12 +152,20 @@ resource "google_storage_bucket_object" "composer_collect" {
   content = file("${local.composer_collect_dir}/${each.value}")
 }
 
+resource "google_storage_bucket_object" "composer_ai" {
+  for_each = toset(local.composer_ai_files)
+
+  bucket  = local.composer_bucket
+  name    = "dags/ai/${each.value}"
+  content = file("${local.composer_ai_dir}/${each.value}")
+}
+
 resource "google_storage_bucket_object" "composer_airflowignore" {
   count = var.enable_composer ? 1 : 0
 
   bucket  = local.composer_bucket
   name    = "dags/.airflowignore"
-  content = "collect/\n"
+  content = "collect/\nai/\n"
 }
 
 resource "google_storage_bucket_object" "composer_dbt" {
