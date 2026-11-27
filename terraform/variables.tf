@@ -37,3 +37,9 @@ variable "gemini_api_key" {
   sensitive   = true
   default     = ""
 }
+
+variable "gastroflow_enable_ai" {
+  description = "Set to \"true\" to run the AI tasks on Composer"
+  type        = string
+  default     = "false"
+}
