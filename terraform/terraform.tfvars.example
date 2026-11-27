@@ -3,6 +3,7 @@ region     = "europe-west1"
 prefix     = "gastroflow"
 
 # Keep destructive cleanup disabled for shared or persistent data.
+gastroflow_enable_ai="true"
 force_destroy  = false
 enable_composer = false
 gemini_api_key ="yourapikey"
