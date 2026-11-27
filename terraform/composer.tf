@@ -67,6 +67,8 @@ resource "google_composer_environment" "this" {
       image_version = var.composer_image_version
       env_variables = {
         GASTROFLOW_ENABLE_AI            = "false"
+        GASTROFLOW_AI_MAX_COMMENTS      = "20"
+        GASTROFLOW_GEMINI_API_KEY       = var.gemini_api_key
         GASTROFLOW_ENV                  = "composer"
         GASTROFLOW_PREFIX               = var.prefix
         GASTROFLOW_PROJECT_ID           = var.project_id

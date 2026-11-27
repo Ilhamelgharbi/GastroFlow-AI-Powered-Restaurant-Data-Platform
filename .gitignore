@@ -50,3 +50,4 @@ airflow/example.env
 # Local patch files and backups
 *.patch
 lake-backup/
+airflow0/

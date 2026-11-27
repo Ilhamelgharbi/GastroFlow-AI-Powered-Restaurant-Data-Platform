@@ -30,3 +30,10 @@ variable "composer_image_version" {
   default     = ""
   description = "Pinned Composer image version; required when enable_composer is true"
 }
+
+variable "gemini_api_key" {
+  description = "Gemini Developer API key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

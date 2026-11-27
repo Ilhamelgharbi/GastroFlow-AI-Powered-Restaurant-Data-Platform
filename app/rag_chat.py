@@ -31,7 +31,7 @@ except ImportError:
     pass
 
 TOP_K = 5
-MAX_COMMENTS = 1000  # safety cap on embedding calls
+MAX_COMMENTS = 20 # safety cap on embedding calls
 CACHE_FILE = "review_embeddings.parquet"
 
 STAGING = llm.env("GASTROFLOW_DBT_DATASET", "DBT_DATASET", default="gastroflow_staging")

@@ -1,8 +1,7 @@
 """Shared Vertex AI (Gemini) helpers for the enrichment job and the apps.
 
-Auth: Application Default Credentials. Locally that is
-`gcloud auth application-default login`; on Cloud Composer it is the
-Composer service account (needs roles/aiplatform.user). No API keys.
+Auth: Gemini calls use the GASTROFLOW_GEMINI_API_KEY environment variable.
+BigQuery uses Google Application Default Credentials. Never commit the key.
 """
 
 from __future__ import annotations
@@ -19,9 +18,7 @@ from google.genai import types
 # gemini-2.5-flash-lite was retired on Vertex AI (Oct 2026). Check
 # "Model versions and lifecycle" in the Vertex AI docs before changing these.
 DEFAULT_CHAT_MODEL = "gemini-3.5-flash-lite"
-DEFAULT_CHAT_LOCATION = "global"
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
-DEFAULT_EMBEDDING_LOCATION = "us-central1"
 
 
 def env(*names: str, default: str = "") -> str:
@@ -48,16 +45,20 @@ def embedding_model() -> str:
     return env("GASTROFLOW_EMBEDDING_MODEL", default=DEFAULT_EMBEDDING_MODEL)
 
 
+def _make_client() -> genai.Client:
+    """Gemini API client, used for both chat and embeddings."""
+    api_key = env("GASTROFLOW_GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GASTROFLOW_GEMINI_API_KEY is not configured")
+    return genai.Client(vertexai=False, api_key=api_key)
+
+
 def make_chat_client() -> genai.Client:
-    location = env("GASTROFLOW_VERTEX_LOCATION", default=DEFAULT_CHAT_LOCATION)
-    return genai.Client(vertexai=True, project=project_id(), location=location)
+    return _make_client()
 
 
 def make_embedding_client() -> genai.Client:
-    location = env(
-        "GASTROFLOW_EMBEDDING_LOCATION", default=DEFAULT_EMBEDDING_LOCATION
-    )
-    return genai.Client(vertexai=True, project=project_id(), location=location)
+    return _make_client()
 
 
 def _sleep_backoff(attempt: int) -> None:
