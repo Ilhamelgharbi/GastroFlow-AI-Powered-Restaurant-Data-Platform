@@ -1,6 +1,7 @@
--- Pending until the AI-enriched review source is created and declared in dbt.
+-- Built only when dbt runs with --vars '{enable_ai: true}' (the Composer DAG does this
+-- after ai_enrich_reviews has filled gastroflow_ai.review_enriched).
 -- COUNTIF counts reviews with a flagged issue without needing a separate filter.
-{{ config(enabled=false, tags=['ai']) }}
+{{ config(enabled=var('enable_ai', false), tags=['ai']) }}
 
 select
     rr.city,
